@@ -1,0 +1,140 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "dialog:default",
+    "fs:default",
+    "fs:allow-mkdir",
+    "fs:allow-write-text-file",
+    "fs:allow-write-file",
+    "fs:allow-read-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/**" }
+      ]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "claude-version",
+          "cmd": "claude",
+          "args": ["--version"],
+          "sidecar": false
+        },
+        {
+          "name": "claude-setup-token",
+          "cmd": "claude",
+          "args": ["setup-token"],
+          "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            { "validator": "[\\s\\S]*" },
+            "--append-system-prompt",
+            { "validator": "[\\s\\S]*" },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet"
+          ],
+          "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt-resume",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            { "validator": "[\\s\\S]*" },
+            "--append-system-prompt",
+            { "validator": "[\\s\\S]*" },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet",
+            "--resume",
+            { "validator": "[\\s\\S]*" }
+          ],
+          "sidecar": false
+        },
+        {
+          "name": "claude-keychain-token",
+          "cmd": "security",
+          "args": ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+          "sidecar": false
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "claude-setup-token",
+          "cmd": "claude",
+          "args": ["setup-token"],
+          "sidecar": false
+        },
+        {
+          "name": "claude-setup-token-pty",
+          "cmd": "script",
+          "args": ["-q", "/dev/null", "claude", "setup-token"],
+          "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            { "validator": "[\\s\\S]*" },
+            "--append-system-prompt",
+            { "validator": "[\\s\\S]*" },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet"
+          ],
+          "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt-resume",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            { "validator": "[\\s\\S]*" },
+            "--append-system-prompt",
+            { "validator": "[\\s\\S]*" },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet",
+            "--resume",
+            { "validator": "[\\s\\S]*" }
+          ],
+          "sidecar": false
+        }
+      ]
+    },
+    "shell:allow-kill",
+    "shell:allow-stdin-write"
+  ]
+}

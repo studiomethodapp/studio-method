@@ -1,0 +1,46 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+/* Indicador de "digitando..." usado enquanto um agente está pensando */
+@keyframes studio-method-typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.studio-method-typing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  /* Antes era roxo fixo (cor do PM) mesmo pra PD/Dev — agora segue a cor de tema do
+     perfil ativo, que já é setada como --sm-accent no container do app. */
+  background-color: var(--sm-accent, #c084fc);
+  animation: studio-method-typing-bounce 1.2s infinite ease-in-out;
+}
+
+.studio-method-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.studio-method-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}

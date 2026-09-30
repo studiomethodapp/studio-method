@@ -356,7 +356,7 @@ const TRANSLATIONS = {
     artifact_download_notFound: "⚠️ Não foi possível encontrar o conteúdo desse artefato para baixar.",
     no_description_provided: "Sem descrição informada.",
     prd_imported_default_title: "PRD importado",
-    claude_setupTimeout_message: "O comando \"claude setup-token\" demorou demais (mais de 2 minutos) e foi cancelado automaticamente. ",
+    claude_setupTimeout_message: "O comando \"claude setup-token\" demorou demais (mais de 30 segundos) e foi cancelado automaticamente. ",
     claude_setupTimeout_outputPrefix: "Saída recebida até aqui:",
     claude_setupTimeout_noOutput: "Nenhuma saída foi recebida — tente de novo, ou use a chave de API.",
     folder_picker_new_root_title: "Escolha a nova pasta-mãe dos projetos",
@@ -562,7 +562,7 @@ const TRANSLATIONS = {
     artifact_download_notFound: "⚠️ Couldn't find this artifact's content to download.",
     no_description_provided: "No description provided.",
     prd_imported_default_title: "Imported PRD",
-    claude_setupTimeout_message: "The \"claude setup-token\" command took too long (over 2 minutes) and was automatically cancelled. ",
+    claude_setupTimeout_message: "The \"claude setup-token\" command took too long (over 30 seconds) and was automatically cancelled. ",
     claude_setupTimeout_outputPrefix: "Output received so far:",
     claude_setupTimeout_noOutput: "No output was received — try again, or use the API key instead.",
     folder_picker_new_root_title: "Choose the new parent folder for projects",
@@ -768,7 +768,7 @@ const TRANSLATIONS = {
     artifact_download_notFound: "⚠️ 找不到该工件的内容以供下载。",
     no_description_provided: "未提供描述。",
     prd_imported_default_title: "已导入的 PRD",
-    claude_setupTimeout_message: "\"claude setup-token\" 命令耗时过长（超过 2 分钟），已自动取消。",
+    claude_setupTimeout_message: "\"claude setup-token\" 命令耗时过长（超过 30 秒），已自动取消。",
     claude_setupTimeout_outputPrefix: "目前收到的输出：",
     claude_setupTimeout_noOutput: "未收到任何输出 — 请重试，或改用 API 密钥。",
     folder_picker_new_root_title: "选择项目的新根文件夹",
@@ -1631,7 +1631,7 @@ export default function App() {
                 : t("claude_setupTimeout_noOutput"))
           );
         });
-      }, 120000);
+      }, 30000);
 
       // Só considera o token "pronto" depois de ver o MESMO resultado em duas checagens seguidas,
       // com 1.2s de silêncio entre elas — isso evita finalizar cedo demais com um pedaço

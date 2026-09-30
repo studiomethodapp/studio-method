@@ -12,12 +12,21 @@ fn greet(name: &str) -> String {
 // funciona nos três sistemas é abrir um terminal virtual de verdade (pty) dentro do próprio
 // app e rodar o comando "dentro" dele — pro "claude" é como se estivesse rodando num
 // terminal comum, então ele se comporta normalmente (funciona igual em Mac, Linux e Windows).
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 struct ClaudeSetupPtyState {
     child: Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+}
+
+// Procura uma sequência de bytes dentro de outra — usada pra achar códigos de escape de
+// terminal (tipo ESC[6n) no meio da saída do comando.
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|window| window == needle)
 }
 
 #[tauri::command]
@@ -31,10 +40,11 @@ fn claude_setup_token_start(app: tauri::AppHandle) -> Result<(), String> {
     cmd.arg("setup-token");
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
-    // Daqui pra frente só precisamos do lado "master" (pra ler a saída) — o "slave" já
-    // entregou o processo filho.
+    // Daqui pra frente só precisamos do lado "master" (pra ler a saída e responder o que for
+    // preciso) — o "slave" já entregou o processo filho.
     let master = pair.master;
     let mut reader = master.try_clone_reader().map_err(|e| e.to_string())?;
+    let mut writer = master.take_writer().map_err(|e| e.to_string())?;
 
     {
         let state = app.state::<ClaudeSetupPtyState>();
@@ -47,12 +57,34 @@ fn claude_setup_token_start(app: tauri::AppHandle) -> Result<(), String> {
         // Mantém o "master" vivo até o laço de leitura terminar (senão o pty fecha cedo demais).
         let _master = master;
         let mut buf = [0u8; 4096];
+        // Guarda os últimos bytes recebidos pra pegar sequências de escape que cheguem
+        // divididas entre duas leituras (raro, mas acontece).
+        let mut tail: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let chunk = &buf[..n];
+                    let text = String::from_utf8_lossy(chunk).to_string();
                     let _ = app_handle.emit("claude-setup-output", text);
+
+                    // Antes de desenhar a tela, algumas interfaces de linha de comando (é o
+                    // caso do "claude setup-token") perguntam pro terminal onde está o cursor
+                    // (código de escape ESC[6n) e ficam esperando a resposta — um terminal de
+                    // verdade devolveria isso sozinho. Como aqui não existe um terminal de
+                    // verdade por trás, quem responde essa pergunta é a gente mesmo; sem essa
+                    // resposta o comando trava pra sempre esperando, que era exatamente o que
+                    // estava acontecendo (por isso a saída parava logo depois desse código).
+                    tail.extend_from_slice(chunk);
+                    if tail.len() > 64 {
+                        let excess = tail.len() - 32;
+                        tail.drain(0..excess);
+                    }
+                    if let Some(pos) = find_subslice(&tail, b"\x1b[6n") {
+                        let _ = writer.write_all(b"\x1b[1;1R");
+                        let _ = writer.flush();
+                        tail.drain(0..pos + 4);
+                    }
                 }
                 Err(_) => break,
             }

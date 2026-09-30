@@ -44,6 +44,9 @@ const CUSTOM_PROVIDER_MODEL_KEY = "studio-method-custom-provider-model";
 const CUSTOM_PROVIDER_API_KEY_KEY = "studio-method-custom-provider-api-key";
 // Chave usada pra guardar a credencial obtida ao conectar com a assinatura Claude (via "claude setup-token")
 const CLAUDE_OAUTH_TOKEN_KEY = "studio-method-claude-oauth-token";
+// Detecta Windows pra evitar truques específicos de macOS/Linux (como o terminal
+// simulado via "script", que não existe no Windows) no fluxo de conectar a assinatura.
+const IS_WINDOWS = typeof navigator !== "undefined" && /win/i.test(navigator.platform || navigator.userAgent || "");
 
 // Perfis disponíveis no primeiro acesso, e a paleta de cores de cada um.
 // A estrutura visual do app é sempre a mesma — só a cor de destaque muda por perfil.
@@ -1390,9 +1393,15 @@ export default function App() {
       // terminal, e um terminal simulado sem um de verdade atrás costuma cair num padrão estreito
       // (tipo 80 colunas) — largo o bastante pra quebrar o token (que passa de 100 caracteres) no
       // meio da linha. Com essas variáveis a gente reduz a chance disso acontecer.
-      const command = Command.create("claude-setup-token-pty", ["-q", "/dev/null", "claude", "setup-token"], {
-        env: { COLUMNS: "2000", LINES: "200" }
-      });
+      // No Windows não existe o comando "script" (o truque de terminal simulado é coisa de
+      // macOS/Linux), então ali a gente roda "claude setup-token" direto mesmo.
+      const command = IS_WINDOWS
+        ? Command.create("claude-setup-token", ["setup-token"], {
+            env: { COLUMNS: "2000", LINES: "200" }
+          })
+        : Command.create("claude-setup-token-pty", ["-q", "/dev/null", "claude", "setup-token"], {
+            env: { COLUMNS: "2000", LINES: "200" }
+          });
       let stdoutBuffer = "";
       let stderrBuffer = "";
       let settled = false;
@@ -1423,6 +1432,9 @@ export default function App() {
       // token na exibição, cortando ele de verdade no meio — foi exatamente isso que causava o
       // erro "OAuth access token is invalid": a gente estava pegando só um pedaço).
       const readTokenFromKeychain = async () => {
+        // O Chaveiro (e o comando "security") é coisa de macOS — no Windows nem tenta, já cai
+        // direto no plano B (ler o token que apareceu na tela).
+        if (IS_WINDOWS) return "";
         try {
           const result = await Command.create("claude-keychain-token").execute();
           if (result.code !== 0) return "";

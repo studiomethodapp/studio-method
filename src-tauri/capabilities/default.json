@@ -114,17 +114,6 @@
           "sidecar": false
         },
         {
-          "name": "claude-setup-token-pty",
-          "cmd": "script",
-          "args": [
-            "-q",
-            "/dev/null",
-            "claude",
-            "setup-token"
-          ],
-          "sidecar": false
-        },
-        {
           "name": "claude-agent-prompt",
           "cmd": "claude",
           "args": [

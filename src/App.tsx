@@ -8,6 +8,8 @@ import { homeDir } from "@tauri-apps/api/path";
 import { getVersion } from "@tauri-apps/api/app";
 import { check as checkForAppUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createClient } from "@supabase/supabase-js";
 import logoStudioMethod from "./assets/logo-studiomethod-negative.svg";
 
@@ -1468,10 +1470,10 @@ export default function App() {
   // verdade (ex: um link de autorização que precise ser aberto manualmente) em vez de só um
   // status genérico de "não conectou".
   const [claudeCliDebugMessage, setClaudeCliDebugMessage] = useState("");
-  // Guarda o processo do "claude setup-token" enquanto ele roda, pra dar pra matar de
-  // verdade se a pessoa clicar em Cancelar (antes o Cancelar só escondia a tela e o
-  // comando continuava rodando escondido, o que deixava a próxima tentativa bagunçada).
-  const claudeSetupChildRef = useRef(null);
+  // Marca se o "claude setup-token" está rodando no momento, pra dar pra matar de verdade
+  // se a pessoa clicar em Cancelar (antes o Cancelar só escondia a tela e o comando
+  // continuava rodando escondido, o que deixava a próxima tentativa bagunçada).
+  const claudeSetupActiveRef = useRef(false);
 
   // Credencial obtida via "claude setup-token" — guardada aqui e usada (como variável de
   // ambiente CLAUDE_CODE_OAUTH_TOKEN) em cada chamada, sem depender do login "global" do
@@ -1512,8 +1514,15 @@ export default function App() {
     }
   };
 
-  // Botão "Conectar ao seu Claude" — roda "claude setup-token", que abre o navegador pra
-  // pessoa autorizar com a conta dela, e devolve uma credencial que a gente guarda.
+  // Botão "Conectar ao seu Claude" — roda "claude setup-token" dentro de um terminal virtual
+  // (pty) real, que abre o navegador pra pessoa autorizar com a conta dela, e devolve uma
+  // credencial que a gente guarda. Antes disso rodava como um processo comum (sem terminal de
+  // verdade por trás), e o Node.js "empacava" a saída num buffer que só é liberado quando o
+  // processo termina sozinho — só que "claude setup-token" às vezes nunca termina sozinho
+  // depois de mostrar a página de sucesso no navegador, então a gente nunca via nada (nem
+  // token, nem erro). O terminal virtual (implementado do lado do Rust, ver
+  // "claude_setup_token_start" em src-tauri/src/lib.rs) resolve isso nos três sistemas
+  // (Mac, Windows, Linux) fazendo o "claude" pensar que está rodando num terminal de verdade.
   const handleConnectClaudeSubscription = async () => {
     setClaudeCliStatus("connecting");
     setClaudeCliDebugMessage("");
@@ -1526,44 +1535,30 @@ export default function App() {
       }
       setClaudeCliVersionInfo(versionCheck.stdout.trim());
 
-      // Antes a gente usava .execute(), que só devolve alguma coisa quando o comando termina
-      // sozinho — e "claude setup-token" às vezes fica "pendurado" depois de já ter mostrado
-      // a página de sucesso no navegador (ele roda sem um terminal de verdade atrás, então
-      // pode ficar esperando por algo que nunca chega). Agora a gente acompanha a saída em
-      // tempo real (dá pra pegar o token assim que ele aparece, sem esperar o processo
-      // encerrar) e tem um limite de tempo, pra nunca mais ficar preso em "Conectando..." pra
-      // sempre.
-      // Roda o "claude setup-token" dentro de um terminal simulado (via "script -q /dev/null").
-      // Sem isso, o comando não percebe que está rodando de verdade e pode ficar esperando
-      // pra sempre depois de já ter autorizado no navegador — mesmo com tudo certo do lado de
-      // fora. O "script" engana ele fazendo parecer que tem um terminal de verdade por trás.
-      // COLUMNS/LINES bem largos: o "claude setup-token" formata a própria saída pro tamanho do
-      // terminal, e um terminal simulado sem um de verdade atrás costuma cair num padrão estreito
-      // (tipo 80 colunas) — largo o bastante pra quebrar o token (que passa de 100 caracteres) no
-      // meio da linha. Com essas variáveis a gente reduz a chance disso acontecer.
-      // No Windows não existe o comando "script" (o truque de terminal simulado é coisa de
-      // macOS/Linux), então ali a gente roda "claude setup-token" direto mesmo.
-      const command = IS_WINDOWS
-        ? Command.create("claude-setup-token", ["setup-token"], {
-            env: { COLUMNS: "2000", LINES: "200" }
-          })
-        : Command.create("claude-setup-token-pty", ["-q", "/dev/null", "claude", "setup-token"], {
-            env: { COLUMNS: "2000", LINES: "200" }
-          });
       let stdoutBuffer = "";
-      let stderrBuffer = "";
       let settled = false;
       let timeoutId = null;
       let quietTimerId = null;
       // Guarda o token visto na última checagem de "silêncio", pra comparar com a próxima.
       let lastQuietToken = null;
+      let unlistenOutput = null;
+      let unlistenClosed = null;
 
-      // Mesmo com COLUMNS grande, o terminal simulado pode quebrar/abreviar uma linha comprida
-      // (como o token, que tem mais de 100 caracteres) na hora de exibir. Por isso, na hora de
-      // procurar o token no texto que aparece na tela, a gente ignora QUALQUER espaço em branco
-      // (quebra de linha, indentação, etc.) antes de comparar. Isso é só um PLANO B — o jeito
-      // principal de pegar o token é ler direto de onde o próprio "claude" guarda (ver
-      // readTokenFromKeychain abaixo), que não depende de como o texto é mostrado na tela.
+      const cleanupListeners = () => {
+        if (unlistenOutput) {
+          unlistenOutput();
+          unlistenOutput = null;
+        }
+        if (unlistenClosed) {
+          unlistenClosed();
+          unlistenClosed = null;
+        }
+      };
+
+      // O terminal virtual não quebra linhas como um terminal estreito faria (a gente já abre
+      // ele bem largo, do lado do Rust), mas mantemos essa limpeza de espaços como plano B —
+      // o jeito principal de pegar o token é ler direto de onde o próprio "claude" guarda (ver
+      // readTokenFromKeychain abaixo), que não depende de como o texto aparece na tela.
       const findToken = () => {
         const flat = stdoutBuffer.replace(/\s+/g, "");
         const match = flat.match(/sk-ant-oat\d{2}-[A-Za-z0-9_-]{20,}/);
@@ -1576,12 +1571,12 @@ export default function App() {
 
       // Jeito principal de pegar o token: ler direto do Chaveiro do macOS, onde o próprio
       // "claude setup-token" grava a credencial depois de autorizar com sucesso. Isso evita
-      // depender de como o texto aparece no terminal simulado (que pode abreviar/quebrar o
-      // token na exibição, cortando ele de verdade no meio — foi exatamente isso que causava o
-      // erro "OAuth access token is invalid": a gente estava pegando só um pedaço).
+      // depender de como o texto aparece no terminal virtual (que, em teoria, poderia
+      // abreviar/quebrar o token na exibição, cortando ele de verdade no meio — foi exatamente
+      // isso que causava o erro "OAuth access token is invalid" antes).
       const readTokenFromKeychain = async () => {
-        // O Chaveiro (e o comando "security") é coisa de macOS — no Windows nem tenta, já cai
-        // direto no plano B (ler o token que apareceu na tela).
+        // O Chaveiro (e o comando "security") é coisa de macOS — no Windows/Linux nem tenta,
+        // já cai direto no plano B (ler o token que apareceu na tela).
         if (IS_WINDOWS) return "";
         try {
           const result = await Command.create("claude-keychain-token").execute();
@@ -1620,15 +1615,14 @@ export default function App() {
         settled = true;
         if (timeoutId) clearTimeout(timeoutId);
         if (quietTimerId) clearTimeout(quietTimerId);
-        claudeSetupChildRef.current = null;
+        cleanupListeners();
+        claudeSetupActiveRef.current = false;
         fn();
       };
 
       timeoutId = setTimeout(() => {
         finishOnce(() => {
-          if (claudeSetupChildRef.current) {
-            claudeSetupChildRef.current.kill().catch(() => {});
-          }
+          invoke("claude_setup_token_kill").catch(() => {});
           setClaudeCliStatus("not_connected");
           setClaudeCliDebugMessage(
             t("claude_setupTimeout_message") +
@@ -1639,35 +1633,6 @@ export default function App() {
         });
       }, 120000);
 
-      command.on("close", (data) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
-        if (quietTimerId) clearTimeout(quietTimerId);
-        claudeSetupChildRef.current = null;
-        const code = data && typeof data.code === "number" ? data.code : -1;
-        resolveBestToken().then((token) => {
-          if (token) {
-            setClaudeOAuthToken(token);
-            setClaudeCliStatus("connected");
-            return;
-          }
-          if (code !== 0) {
-            console.error("Erro ao conectar com a Claude:", stderrBuffer);
-          }
-          setClaudeCliStatus("not_connected");
-          setClaudeCliDebugMessage((stderrBuffer || stdoutBuffer).trim().slice(0, 600));
-        });
-      });
-
-      command.on("error", (err) => {
-        finishOnce(() => {
-          console.error("Erro ao conectar com a Claude:", err);
-          setClaudeCliStatus("not_found");
-          setClaudeCliDebugMessage(String(err));
-        });
-      });
-
       // Só considera o token "pronto" depois de ver o MESMO resultado em duas checagens seguidas,
       // com 1.2s de silêncio entre elas — isso evita finalizar cedo demais com um pedaço
       // incompleto (por exemplo, se a linha com o restante do token ainda está a caminho quando
@@ -1677,17 +1642,12 @@ export default function App() {
         quietTimerId = setTimeout(() => {
           const token = findToken();
           if (token && token === lastQuietToken) {
-            if (settled) return;
-            settled = true;
-            if (timeoutId) clearTimeout(timeoutId);
-            const childToKill = claudeSetupChildRef.current;
-            claudeSetupChildRef.current = null;
-            // Antes de aceitar o que apareceu na tela (que pode vir cortado), tenta primeiro
-            // ler o token completo direto do Chaveiro.
-            resolveBestToken().then((resolvedToken) => {
-              setClaudeOAuthToken(resolvedToken || token);
-              setClaudeCliStatus("connected");
-              if (childToKill) childToKill.kill().catch(() => {});
+            finishOnce(() => {
+              resolveBestToken().then((resolvedToken) => {
+                setClaudeOAuthToken(resolvedToken || token);
+                setClaudeCliStatus("connected");
+              });
+              invoke("claude_setup_token_kill").catch(() => {});
             });
             return;
           }
@@ -1696,19 +1656,36 @@ export default function App() {
         }, 1200);
       };
 
-      command.stdout.on("data", (line) => {
-        stdoutBuffer += `${line}\n`;
+      // Ouve a saída do terminal virtual (emitida pelo lado do Rust) e o aviso de quando o
+      // processo fecha sozinho.
+      unlistenOutput = await listen("claude-setup-output", (event) => {
+        stdoutBuffer += event.payload || "";
         // Chegou informação nova — invalida a checagem de estabilidade anterior e recomeça a
         // contagem do silêncio.
         lastQuietToken = null;
         scheduleQuietCheck();
       });
-      command.stderr.on("data", (line) => {
-        stderrBuffer += `${line}\n`;
+
+      unlistenClosed = await listen("claude-setup-closed", (event) => {
+        finishOnce(() => {
+          const code = typeof event.payload === "number" ? event.payload : -1;
+          resolveBestToken().then((token) => {
+            if (token) {
+              setClaudeOAuthToken(token);
+              setClaudeCliStatus("connected");
+              return;
+            }
+            if (code !== 0) {
+              console.error("Erro ao conectar com a Claude, código de saída:", code);
+            }
+            setClaudeCliStatus("not_connected");
+            setClaudeCliDebugMessage(stdoutBuffer.trim().slice(0, 600));
+          });
+        });
       });
 
-      const child = await command.spawn();
-      if (!settled) claudeSetupChildRef.current = child;
+      claudeSetupActiveRef.current = true;
+      await invoke("claude_setup_token_start");
     } catch (err) {
       console.error("Erro ao conectar com a Claude:", err);
       setClaudeCliStatus("not_found");
@@ -1721,9 +1698,9 @@ export default function App() {
   // o processo do "claude setup-token" em vez de só esconder a tela (antes ele continuava
   // rodando escondido, bagunçando a próxima tentativa).
   const handleDisconnectClaudeSubscription = () => {
-    if (claudeSetupChildRef.current) {
-      claudeSetupChildRef.current.kill().catch(() => {});
-      claudeSetupChildRef.current = null;
+    if (claudeSetupActiveRef.current) {
+      invoke("claude_setup_token_kill").catch(() => {});
+      claudeSetupActiveRef.current = false;
     }
     setClaudeOAuthToken("");
     setClaudeCliStatus("not_connected");

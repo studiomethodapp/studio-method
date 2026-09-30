@@ -4,6 +4,94 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+// "claude setup-token" (usado pra conectar a assinatura Claude) só imprime a sua saída de
+// verdade quando está rodando dentro de um terminal de verdade — sem isso, o Node.js deixa
+// tudo "empacado" num buffer que nunca chega a ser mandado pra fora (nem o processo fecha
+// sozinho depois de autorizar no navegador). No Mac/Linux dava pra contornar rodando o
+// comando dentro do utilitário "script"; no Windows esse utilitário não existe. A solução que
+// funciona nos três sistemas é abrir um terminal virtual de verdade (pty) dentro do próprio
+// app e rodar o comando "dentro" dele — pro "claude" é como se estivesse rodando num
+// terminal comum, então ele se comporta normalmente (funciona igual em Mac, Linux e Windows).
+use std::io::Read;
+use std::sync::Mutex;
+use tauri::{Emitter, Manager};
+
+struct ClaudeSetupPtyState {
+    child: Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+}
+
+#[tauri::command]
+fn claude_setup_token_start(app: tauri::AppHandle) -> Result<(), String> {
+    let pty_system = portable_pty::native_pty_system();
+    let pair = pty_system
+        .openpty(portable_pty::PtySize { rows: 200, cols: 2000, pixel_width: 0, pixel_height: 0 })
+        .map_err(|e| e.to_string())?;
+
+    let mut cmd = portable_pty::CommandBuilder::new("claude");
+    cmd.arg("setup-token");
+
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    // Daqui pra frente só precisamos do lado "master" (pra ler a saída) — o "slave" já
+    // entregou o processo filho.
+    let master = pair.master;
+    let mut reader = master.try_clone_reader().map_err(|e| e.to_string())?;
+
+    {
+        let state = app.state::<ClaudeSetupPtyState>();
+        let mut guard = state.child.lock().map_err(|e| e.to_string())?;
+        *guard = Some(child);
+    }
+
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        // Mantém o "master" vivo até o laço de leitura terminar (senão o pty fecha cedo demais).
+        let _master = master;
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = app_handle.emit("claude-setup-output", text);
+                }
+                Err(_) => break,
+            }
+        }
+        let exit_code: i32 = {
+            let state = app_handle.state::<ClaudeSetupPtyState>();
+            let mut guard = match state.child.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    let _ = app_handle.emit("claude-setup-closed", -1);
+                    return;
+                }
+            };
+            match guard.take() {
+                Some(mut child) => match child.wait() {
+                    Ok(status) => status.exit_code() as i32,
+                    Err(_) => -1,
+                },
+                None => -1,
+            }
+        };
+        let _ = app_handle.emit("claude-setup-closed", exit_code);
+    });
+
+    Ok(())
+}
+
+// Botão "Cancelar" enquanto está "Conectando...", ou ao trocar de tentativa — mata o processo
+// do "claude setup-token" de verdade, pra não ficar rodando escondido.
+#[tauri::command]
+fn claude_setup_token_kill(state: tauri::State<ClaudeSetupPtyState>) -> Result<(), String> {
+    if let Ok(mut guard) = state.child.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+    Ok(())
+}
+
 // Quando o app é aberto normalmente (duplo clique, não pelo Terminal), o macOS/Windows
 // não carrega o PATH configurado no .zshrc/.bashrc/perfil do usuário — só um PATH mínimo
 // do sistema. Isso faz comandos como "claude" (instalado via npm, Homebrew, nvm, etc.) não
@@ -122,13 +210,14 @@ fn get_login_shell_path() -> Option<String> {
 pub fn run() {
     fix_path_env();
     tauri::Builder::default()
+        .manage(ClaudeSetupPtyState { child: Mutex::new(None) })
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![greet, claude_setup_token_start, claude_setup_token_kill])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

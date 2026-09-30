@@ -5,22 +5,28 @@
 <h1 align="center">Studio Method</h1>
 
 <p align="center">
-  Um app de desktop que organiza o fluxo de trabalho de times de produto — do PRD ao código — com ajuda de agentes de IA.
+  <a href="README.md">Português (BR)</a> ·
+  <a href="docs/i18n/README.en.md">English</a> ·
+  <a href="docs/i18n/README.zh-CN.md">中文</a>
 </p>
 
 ---
 
+O Studio Method é um aplicativo de desktop para macOS e Windows que funciona como um hub centralizador de métodos avançados de trabalho com IA, como Superpowers e BMAD.
+
 ## O que é
 
-O Studio Method é um aplicativo de desktop (Mac e Windows) feito para times de produto trabalharem juntos, cada um na sua etapa, dentro do mesmo projeto:
+Ele organiza e conecta todo o fluxo de produção de times de produto, unificando desde a concepção e escrita do PRD até o código final.
 
-- **PM (Product Manager)** — cria e gerencia o PRD (documento de requisitos do produto).
-- **PD (Product Designer)** — transforma o PRD em protótipo.
-- **Dev (Desenvolvedor)** — recebe o projeto compartilhado e faz a implementação.
+Dentro da plataforma, cada integrante trabalha no mesmo projeto a partir de uma interface adaptada ao seu perfil:
 
-O app se adapta ao perfil escolhido: cada pessoa vê só as informações e ferramentas relevantes para a sua função. A comunicação entre as etapas acontece dentro do próprio app — ao marcar um projeto como "Compartilhar com o Dev", por exemplo, ele já cai pronto na fila de quem for implementar.
+- **PM (Product Manager)**: estrutura e gerencia os requisitos do produto em PRDs padronizados.
+- **PD (Product Designer)**: transforma o escopo em protótipos alinhados às diretrizes do projeto.
+- **Dev (Desenvolvedor)**: recebe os handoffs já estruturados e prontos para a fila de implementação.
 
-Todo o trabalho é feito com apoio de agentes de IA (acionados digitando `/` no chat), que ajudam a escrever o PRD, gerar o protótipo ou orientar a implementação — respeitando as diretrizes de design e o nível de aderência ao design system que o time configurar.
+A passagem de bastão acontece de forma contínua no próprio app. Ao sinalizar uma etapa como concluída ou pronta para o próximo perfil, o projeto avança automaticamente para a fila do responsável seguinte.
+
+Durante todo o processo, agentes de IA integrados e acionados por comando de barra (`/`) dão suporte à execução das tarefas. Eles aplicam as metodologias configuradas para auxiliar na escrita de documentações, na geração de protótipos e no direcionamento do código, garantindo o nível ideal de aderência ao design system e às regras do time.
 
 ## Privacidade e segurança
 
@@ -31,8 +37,6 @@ O único dado que passa por um servidor externo (Supabase) é o necessário para
 Se você conectar um modelo de IA (Claude, um servidor Ollama local, ou outro compatível com a API da OpenAI), as mensagens que você enviar no chat são compartilhadas com esse provedor de IA para gerar as respostas — como acontece em qualquer app que usa IA. Sem conectar um modelo, os agentes não funcionam, mas o resto do app funciona normalmente.
 
 ## Como instalar
-
-> Este repositório é privado — só quem tem acesso convidado consegue ver esta página e baixar os arquivos.
 
 1. Vá até a aba **[Releases](../../releases)** deste repositório.
 2. Baixe o instalador do seu sistema na versão mais recente:

@@ -24,6 +24,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,6 +40,27 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Monta a descrição da release sozinho, a partir dos commits desde a versão anterior —
+      # assim cada release já chega com um resumo do que mudou, sem precisar editar na mão.
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ github.ref_name }}$" | head -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            BODY="Primeira versão publicada."
+          else
+            BODY=$(git log "$PREV_TAG"..${{ github.ref_name }} --no-merges --pretty=format:"- %s")
+            if [ -z "$BODY" ]; then
+              BODY="Sem mudanças de código listadas nesta versão."
+            fi
+          fi
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,7 +69,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Studio Method ${{ github.ref_name }}'
-          releaseBody: 'Ver as notas de versão abaixo, ou os commits para detalhes.'
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

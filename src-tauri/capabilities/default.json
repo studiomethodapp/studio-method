@@ -19,7 +19,9 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$HOME/**" }
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
     {
@@ -28,13 +30,17 @@
         {
           "name": "claude-version",
           "cmd": "claude",
-          "args": ["--version"],
+          "args": [
+            "--version"
+          ],
           "sidecar": false
         },
         {
           "name": "claude-setup-token",
           "cmd": "claude",
-          "args": ["setup-token"],
+          "args": [
+            "setup-token"
+          ],
           "sidecar": false
         },
         {
@@ -42,9 +48,13 @@
           "cmd": "claude",
           "args": [
             "-p",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--append-system-prompt",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--allowedTools",
             "Write,Read,Edit,Glob,Grep",
             "--output-format",
@@ -59,9 +69,13 @@
           "cmd": "claude",
           "args": [
             "-p",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--append-system-prompt",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--allowedTools",
             "Write,Read,Edit,Glob,Grep",
             "--output-format",
@@ -69,14 +83,21 @@
             "--model",
             "sonnet",
             "--resume",
-            { "validator": "[\\s\\S]*" }
+            {
+              "validator": "[\\s\\S]*"
+            }
           ],
           "sidecar": false
         },
         {
           "name": "claude-keychain-token",
           "cmd": "security",
-          "args": ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+          "args": [
+            "find-generic-password",
+            "-s",
+            "Claude Code-credentials",
+            "-w"
+          ],
           "sidecar": false
         }
       ]
@@ -87,13 +108,20 @@
         {
           "name": "claude-setup-token",
           "cmd": "claude",
-          "args": ["setup-token"],
+          "args": [
+            "setup-token"
+          ],
           "sidecar": false
         },
         {
           "name": "claude-setup-token-pty",
           "cmd": "script",
-          "args": ["-q", "/dev/null", "claude", "setup-token"],
+          "args": [
+            "-q",
+            "/dev/null",
+            "claude",
+            "setup-token"
+          ],
           "sidecar": false
         },
         {
@@ -101,9 +129,13 @@
           "cmd": "claude",
           "args": [
             "-p",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--append-system-prompt",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--allowedTools",
             "Write,Read,Edit,Glob,Grep",
             "--output-format",
@@ -118,9 +150,13 @@
           "cmd": "claude",
           "args": [
             "-p",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--append-system-prompt",
-            { "validator": "[\\s\\S]*" },
+            {
+              "validator": "[\\s\\S]*"
+            },
             "--allowedTools",
             "Write,Read,Edit,Glob,Grep",
             "--output-format",
@@ -128,13 +164,17 @@
             "--model",
             "sonnet",
             "--resume",
-            { "validator": "[\\s\\S]*" }
+            {
+              "validator": "[\\s\\S]*"
+            }
           ],
           "sidecar": false
         }
       ]
     },
     "shell:allow-kill",
-    "shell:allow-stdin-write"
+    "shell:allow-stdin-write",
+    "updater:default",
+    "process:default"
   ]
 }

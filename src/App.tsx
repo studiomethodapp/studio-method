@@ -5,6 +5,9 @@ import { writeTextFile, writeFile, mkdir, readTextFile, copyFile, remove } from 
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Command } from "@tauri-apps/plugin-shell";
 import { homeDir } from "@tauri-apps/api/path";
+import { getVersion } from "@tauri-apps/api/app";
+import { check as checkForAppUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { createClient } from "@supabase/supabase-js";
 import logoStudioMethod from "./assets/logo-studiomethod-negative.svg";
 
@@ -47,6 +50,9 @@ const CLAUDE_OAUTH_TOKEN_KEY = "studio-method-claude-oauth-token";
 // Detecta Windows pra evitar truques específicos de macOS/Linux (como o terminal
 // simulado via "script", que não existe no Windows) no fluxo de conectar a assinatura.
 const IS_WINDOWS = typeof navigator !== "undefined" && /win/i.test(navigator.platform || navigator.userAgent || "");
+// Guarda a versão que a pessoa já viu e decidiu adiar (clicou em "Não"), pra não ficar
+// mostrando o mesmo aviso de atualização toda vez que o app abre.
+const UPDATE_DISMISSED_VERSION_KEY = "studio-method-update-dismissed-version";
 
 // Perfis disponíveis no primeiro acesso, e a paleta de cores de cada um.
 // A estrutura visual do app é sempre a mesma — só a cor de destaque muda por perfil.
@@ -239,6 +245,21 @@ const TRANSLATIONS = {
     onboarding_step3_body: "Vá em Configurações → Modelos de IA e conecte um modelo (recomendado: sua assinatura da Claude). Sem isso, os agentes não conseguem responder.",
     onboarding_step4_title: "Compartilhe entre perfis",
     onboarding_step4_body: "Ao marcar um projeto como \"Compartilhar com o Dev\", ele envia as informações direto para a fila do desenvolvedor, pronto para ser trabalhado.",
+    update_dialog_title: "Atualização disponível",
+    update_dialog_body: "Uma nova versão do Studio Method já está pronta. Quer atualizar agora?",
+    update_dialog_no: "Não",
+    update_dialog_yes: "Sim, atualizar",
+    update_installing_title: "Atualizando...",
+    update_installing_body: "Baixando e instalando a nova versão. O app vai reiniciar sozinho em instantes.",
+    update_install_error: "Não deu para instalar a atualização agora. Tente de novo mais tarde.",
+    settings_update_title: "Atualizações",
+    settings_update_currentVersion: "Versão atual:",
+    settings_update_available: "Uma nova versão está disponível.",
+    settings_update_upToDate: "Você já está usando a versão mais recente.",
+    settings_update_checking: "Checando...",
+    settings_update_checkButton: "Verificar atualizações",
+    settings_update_installButton: "Atualizar agora",
+    settings_update_error: "Não deu para checar atualizações agora.",
     auth_choice_title: "Bem-vindo",
     auth_choice_subtitle: "Crie uma conta para começar ou acesse a plataforma.",
     auth_create_account: "Criar conta",
@@ -430,6 +451,21 @@ const TRANSLATIONS = {
     onboarding_step3_body: "Go to Settings → AI Models and connect a model (recommended: your Claude subscription). Without it, the agents can't reply.",
     onboarding_step4_title: "Share between profiles",
     onboarding_step4_body: "Marking a project as \"Share with Dev\" sends its information straight to the developer's queue, ready to be worked on.",
+    update_dialog_title: "Update available",
+    update_dialog_body: "A new version of Studio Method is ready. Do you want to update now?",
+    update_dialog_no: "No",
+    update_dialog_yes: "Yes, update",
+    update_installing_title: "Updating...",
+    update_installing_body: "Downloading and installing the new version. The app will restart on its own in a moment.",
+    update_install_error: "Couldn't install the update right now. Try again later.",
+    settings_update_title: "Updates",
+    settings_update_currentVersion: "Current version:",
+    settings_update_available: "A new version is available.",
+    settings_update_upToDate: "You're already on the latest version.",
+    settings_update_checking: "Checking...",
+    settings_update_checkButton: "Check for updates",
+    settings_update_installButton: "Update now",
+    settings_update_error: "Couldn't check for updates right now.",
     auth_choice_title: "Welcome",
     auth_choice_subtitle: "Create an account to get started, or sign in to the platform.",
     auth_create_account: "Create account",
@@ -621,6 +657,21 @@ const TRANSLATIONS = {
     onboarding_step3_body: "前往 设置 → AI 模型，连接一个模型（推荐使用你的 Claude 订阅）。没有配置的话，智能体无法回复。",
     onboarding_step4_title: "在角色之间共享",
     onboarding_step4_body: "把项目标记为「与 Dev 共享」后，信息会直接发送到开发者的队列中，随时可以开始处理。",
+    update_dialog_title: "有新版本可用",
+    update_dialog_body: "Studio Method 的新版本已经准备好。要现在更新吗？",
+    update_dialog_no: "暂不",
+    update_dialog_yes: "是，立即更新",
+    update_installing_title: "正在更新…",
+    update_installing_body: "正在下载并安装新版本，应用将在片刻后自动重启。",
+    update_install_error: "现在无法安装更新，请稍后重试。",
+    settings_update_title: "更新",
+    settings_update_currentVersion: "当前版本：",
+    settings_update_available: "有新版本可用。",
+    settings_update_upToDate: "你正在使用最新版本。",
+    settings_update_checking: "正在检查…",
+    settings_update_checkButton: "检查更新",
+    settings_update_installButton: "立即更新",
+    settings_update_error: "现在无法检查更新。",
     auth_choice_title: "欢迎",
     auth_choice_subtitle: "创建账户开始使用，或登录平台。",
     auth_create_account: "创建账户",
@@ -1063,6 +1114,103 @@ export default function App() {
       console.error("Erro ao salvar o idioma:", err);
     }
   }, [language]);
+
+  // Atualizações automáticas do app — checa sozinho ao abrir, e também dá pra checar na mão
+  // pelo botão em Configurações.
+  const [appVersion, setAppVersion] = useState("");
+  // Objeto "Update" devolvido pelo plugin quando existe uma versão nova (guarda a versão,
+  // as notas e o método pra baixar/instalar). Fica null enquanto não há nada novo.
+  const [updateInfo, setUpdateInfo] = useState(null);
+  // "idle" | "checking" | "upToDate" | "available" | "error"
+  const [updateCheckStatus, setUpdateCheckStatus] = useState("idle");
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
+  // "idle" | "downloading" | "installing" | "error" — status de quando a pessoa já mandou instalar.
+  const [updateInstallStatus, setUpdateInstallStatus] = useState("idle");
+  const [updateInstallError, setUpdateInstallError] = useState("");
+
+  // Confere se existe uma versão nova publicada no GitHub. `notifyIfAvailable` controla se,
+  // encontrando uma, mostra o aviso na tela na hora (usado na checagem automática ao abrir o
+  // app) ou só atualiza o status silenciosamente (usado quando a pessoa clica em "Verificar
+  // atualizações" nas Configurações, onde o resultado já aparece ali mesmo).
+  const handleCheckForUpdates = async (notifyIfAvailable) => {
+    setUpdateCheckStatus("checking");
+    try {
+      const update = await checkForAppUpdate();
+      if (update && update.available) {
+        setUpdateInfo(update);
+        setUpdateCheckStatus("available");
+        if (notifyIfAvailable) {
+          let dismissedVersion = "";
+          try {
+            dismissedVersion = localStorage.getItem(UPDATE_DISMISSED_VERSION_KEY) || "";
+          } catch (err) {
+            dismissedVersion = "";
+          }
+          // Só mostra o pop-up de novo se for uma versão diferente da que a pessoa já
+          // adiou antes — senão ela apareceria toda vez que o app abrisse.
+          if (dismissedVersion !== update.version) {
+            setIsUpdateDialogOpen(true);
+          }
+        }
+      } else {
+        setUpdateInfo(null);
+        setUpdateCheckStatus("upToDate");
+      }
+    } catch (err) {
+      console.error("Erro ao checar atualização do Studio Method:", err);
+      setUpdateCheckStatus("error");
+    }
+  };
+
+  // Botão "Não" do aviso — só adia. A atualização continua disponível em Configurações pra
+  // instalar quando a pessoa achar melhor.
+  const handleDismissUpdateDialog = () => {
+    setIsUpdateDialogOpen(false);
+    try {
+      if (updateInfo && updateInfo.version) {
+        localStorage.setItem(UPDATE_DISMISSED_VERSION_KEY, updateInfo.version);
+      }
+    } catch (err) {
+      console.error("Erro ao guardar a atualização adiada:", err);
+    }
+  };
+
+  // Botão "Sim" do aviso (ou "Atualizar agora" em Configurações) — baixa, instala e reabre
+  // o app já na versão nova. Projetos, login e configurações continuam do jeito que estavam,
+  // porque ficam salvos em disco/localStorage, não perdidos ao reiniciar.
+  const handleInstallUpdate = async () => {
+    if (!updateInfo) return;
+    setUpdateInstallStatus("downloading");
+    setUpdateInstallError("");
+    try {
+      await updateInfo.downloadAndInstall();
+      setUpdateInstallStatus("installing");
+      await relaunch();
+    } catch (err) {
+      console.error("Erro ao instalar a atualização do Studio Method:", err);
+      setUpdateInstallStatus("error");
+      setUpdateInstallError(String(err && err.message ? err.message : err));
+    }
+  };
+
+  // Ao abrir o app: guarda a versão atual (pra mostrar em Configurações) e, depois de um
+  // pequeno intervalo (pra não competir com tudo mais que carrega no início), checa sozinho
+  // se existe uma versão nova.
+  useEffect(() => {
+    let isMounted = true;
+    getVersion()
+      .then((v) => {
+        if (isMounted) setAppVersion(v);
+      })
+      .catch((err) => console.error("Erro ao ler a versão do app:", err));
+    const timer = setTimeout(() => {
+      handleCheckForUpdates(true);
+    }, 3000);
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, []);
 
   // Sessão de login real (Supabase): ao abrir o app, verifica se a pessoa já estava logada
   // (sessão salva) — se sim, entra direto sem pedir login de novo. Também fica de olho em
@@ -4044,6 +4192,50 @@ export default function App() {
               </select>
             </div>
 
+            {/* CARD: ATUALIZAÇÕES — vale para os três perfis, sempre visível (assim como o
+                de Idioma). Mostra a versão atual e, se houver uma nova, o botão pra instalar. */}
+            <div style={{ padding: "24px", borderRadius: "16px", marginBottom: "16px", ...glassCardStyle }}>
+              <label style={{ display: "block", fontSize: "12px", color: "var(--sm-accent)", marginBottom: "8px" }}>{t("settings_update_title")}</label>
+              <p style={{ fontSize: "11px", color: "var(--sm-muted)", margin: "0 0 12px 0" }}>
+                {t("settings_update_currentVersion")} {appVersion || "…"}
+              </p>
+
+              {updateCheckStatus === "available" && updateInfo && (
+                <p style={{ fontSize: "12px", color: "var(--sm-highlight)", margin: "0 0 12px 0" }}>
+                  {t("settings_update_available")} (v{updateInfo.version})
+                </p>
+              )}
+              {updateCheckStatus === "upToDate" && (
+                <p style={{ fontSize: "12px", color: "var(--sm-muted)", margin: "0 0 12px 0" }}>{t("settings_update_upToDate")}</p>
+              )}
+              {updateCheckStatus === "error" && (
+                <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 12px 0" }}>{t("settings_update_error")}</p>
+              )}
+              {updateInstallStatus === "error" && updateInstallError && (
+                <p style={{ fontSize: "11px", color: "#fca5a5", margin: "0 0 12px 0" }}>{t("update_install_error")}</p>
+              )}
+
+              {updateCheckStatus === "available" && updateInfo ? (
+                <button
+                  type="button"
+                  onClick={handleInstallUpdate}
+                  disabled={updateInstallStatus === "downloading" || updateInstallStatus === "installing"}
+                  style={{ width: "100%", padding: "8px 16px", borderRadius: "8px", border: "none", background: "linear-gradient(135deg, var(--sm-accent) 0%, var(--sm-accent-deep) 100%)", color: "#fff", fontSize: "12px", fontWeight: "600", cursor: updateInstallStatus === "downloading" || updateInstallStatus === "installing" ? "default" : "pointer", opacity: updateInstallStatus === "downloading" || updateInstallStatus === "installing" ? 0.7 : 1 }}
+                >
+                  {updateInstallStatus === "downloading" || updateInstallStatus === "installing" ? t("update_installing_title") : t("settings_update_installButton")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleCheckForUpdates(false)}
+                  disabled={updateCheckStatus === "checking"}
+                  style={{ width: "100%", padding: "8px 16px", borderRadius: "8px", fontSize: "12px", cursor: updateCheckStatus === "checking" ? "default" : "pointer", boxSizing: "border-box", ...glassInputStyle }}
+                >
+                  {updateCheckStatus === "checking" ? t("settings_update_checking") : t("settings_update_checkButton")}
+                </button>
+              )}
+            </div>
+
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
 
               {/* CARD: ONDE OS PROJETOS FICAM GUARDADOS — Pasta raiz e Repositório na nuvem são a
@@ -5269,6 +5461,50 @@ export default function App() {
                 {onboardingStep < 3 ? t("onboarding_next") : t("onboarding_start")}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: AVISO DE ATUALIZAÇÃO DISPONÍVEL — aparece sozinho ao abrir o app quando existe
+          uma versão nova (e a pessoa ainda não adiou essa mesma versão). "Não" só adia (some
+          por enquanto, mas continua disponível em Configurações); "Sim" baixa, instala e
+          reabre o app já atualizado. */}
+      {isUpdateDialogOpen && updateInfo && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 210 }}>
+          <div style={{ padding: "28px", borderRadius: "16px", width: "100%", maxWidth: "400px", ...glassCardStyle }}>
+            {updateInstallStatus === "downloading" || updateInstallStatus === "installing" ? (
+              <>
+                <h2 style={{ marginTop: 0, marginBottom: "8px", fontSize: "17px", color: "#fff" }}>{t("update_installing_title")}</h2>
+                <p style={{ margin: 0, fontSize: "13px", color: "var(--sm-pale)", lineHeight: "1.6" }}>{t("update_installing_body")}</p>
+              </>
+            ) : (
+              <>
+                <h2 style={{ marginTop: 0, marginBottom: "8px", fontSize: "17px", color: "#fff" }}>{t("update_dialog_title")}</h2>
+                <p style={{ margin: "0 0 4px 0", fontSize: "13px", color: "var(--sm-pale)", lineHeight: "1.6" }}>{t("update_dialog_body")}</p>
+                <p style={{ margin: 0, fontSize: "11px", color: "var(--sm-muted)" }}>v{updateInfo.version}</p>
+
+                {updateInstallStatus === "error" && (
+                  <p style={{ fontSize: "11px", color: "#fca5a5", margin: "12px 0 0 0" }}>{t("update_install_error")}</p>
+                )}
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "24px" }}>
+                  <button
+                    type="button"
+                    onClick={handleDismissUpdateDialog}
+                    style={{ padding: "8px 20px", backgroundColor: "transparent", color: "var(--sm-muted)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "8px", fontSize: "12px", cursor: "pointer" }}
+                  >
+                    {t("update_dialog_no")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleInstallUpdate}
+                    style={{ padding: "8px 20px", backgroundColor: "var(--sm-accent)", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: "600", cursor: "pointer" }}
+                  >
+                    {t("update_dialog_yes")}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

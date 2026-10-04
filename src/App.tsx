@@ -2868,12 +2868,22 @@ export default function App() {
       const projectUsesFigma =
         Boolean(existingProjectForSession?.usesFigma) || mentionsFigmaLink || designSystemIsFigma;
 
+      // IMPORTANTE: por padrão, o Claude Code grava o system prompt na PRIMEIRA mensagem de
+      // uma conversa retomada com --resume e ignora qualquer --append-system-prompt novo nas
+      // mensagens seguintes (só passa a valer depois de uma compactação). Era por isso que,
+      // ao trocar de agente com "/" ou trocar o Design System em Configurações no meio de uma
+      // conversa já existente, a mudança não tinha efeito nas mensagens seguintes — o agente
+      // "voltava sozinho" pro que valia na primeira mensagem daquele projeto. "--system-prompt-
+      // snapshot off" faz reconstruir o system prompt em toda mensagem, usando sempre o agente
+      // e as configurações atuais.
       const baseCliArgs = projectUsesFigma
         ? [
             "-p",
             cliPromptText,
             "--append-system-prompt",
             systemInstruction + fileToolsInstruction + figmaReadToolsInstruction,
+            "--system-prompt-snapshot",
+            "off",
             "--allowedTools",
             `Write,Read,Edit,Glob,Grep,WebFetch,WebSearch,${FIGMA_READ_TOOLS}`,
             "--mcp-config",
@@ -2889,6 +2899,8 @@ export default function App() {
             cliPromptText,
             "--append-system-prompt",
             systemInstruction + fileToolsInstruction,
+            "--system-prompt-snapshot",
+            "off",
             "--allowedTools",
             "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch",
             "--output-format",

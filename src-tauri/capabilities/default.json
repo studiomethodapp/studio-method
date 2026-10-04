@@ -99,6 +99,58 @@
             "-w"
           ],
           "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt-figma",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--append-system-prompt",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch,mcp__Figma__get_design_context,mcp__Figma__get_metadata,mcp__Figma__get_variable_defs,mcp__Figma__get_screenshot,mcp__Figma__search_design_system,mcp__Figma__get_libraries,mcp__Figma__whoami",
+            "--mcp-config",
+            "{\"mcpServers\":{\"Figma\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:3845/mcp\"}}}",
+            "--strict-mcp-config",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet"
+          ],
+          "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt-figma-resume",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--append-system-prompt",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch,mcp__Figma__get_design_context,mcp__Figma__get_metadata,mcp__Figma__get_variable_defs,mcp__Figma__get_screenshot,mcp__Figma__search_design_system,mcp__Figma__get_libraries,mcp__Figma__whoami",
+            "--mcp-config",
+            "{\"mcpServers\":{\"Figma\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:3845/mcp\"}}}",
+            "--strict-mcp-config",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet",
+            "--resume",
+            {
+              "validator": "[\\s\\S]*"
+            }
+          ],
+          "sidecar": false
         }
       ]
     },
@@ -148,6 +200,58 @@
             },
             "--allowedTools",
             "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet",
+            "--resume",
+            {
+              "validator": "[\\s\\S]*"
+            }
+          ],
+          "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt-figma",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--append-system-prompt",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch,mcp__Figma__get_design_context,mcp__Figma__get_metadata,mcp__Figma__get_variable_defs,mcp__Figma__get_screenshot,mcp__Figma__search_design_system,mcp__Figma__get_libraries,mcp__Figma__whoami",
+            "--mcp-config",
+            "{\"mcpServers\":{\"Figma\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:3845/mcp\"}}}",
+            "--strict-mcp-config",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet"
+          ],
+          "sidecar": false
+        },
+        {
+          "name": "claude-agent-prompt-figma-resume",
+          "cmd": "claude",
+          "args": [
+            "-p",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--append-system-prompt",
+            {
+              "validator": "[\\s\\S]*"
+            },
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch,mcp__Figma__get_design_context,mcp__Figma__get_metadata,mcp__Figma__get_variable_defs,mcp__Figma__get_screenshot,mcp__Figma__search_design_system,mcp__Figma__get_libraries,mcp__Figma__whoami",
+            "--mcp-config",
+            "{\"mcpServers\":{\"Figma\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:3845/mcp\"}}}",
+            "--strict-mcp-config",
             "--output-format",
             "json",
             "--model",

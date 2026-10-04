@@ -2742,6 +2742,35 @@ export default function App() {
         "avaliar/analisar um site, use a ferramenta de leitura de páginas diretamente, sem " +
         "perguntar se pode ou dizer que precisa de permissão — apenas acesse a página e faça a " +
         "análise pedida.";
+      // Quando a pessoa manda um link do Figma (ou já mandou antes, nesse mesmo projeto),
+      // liberamos também as ferramentas de LEITURA do Figma (nunca escrita — o agente nunca
+      // cria nem altera nada dentro do Figma). Elas só funcionam se o app do Figma Desktop da
+      // pessoa estiver aberto com a opção "Dev Mode MCP Server" ativada nas preferências dele
+      // (é o mesmo recurso que o Figma oferece pro Claude Code normalmente, só que aqui a gente
+      // já deixa pronto, sem a pessoa precisar configurar nada). Mantemos isso de fora da
+      // chamada padrão porque, com o Figma Desktop fechado, o Claude Code pode esperar até 30
+      // segundos tentando conectar nele antes de responder — não faz sentido pagar esse preço
+      // em toda mensagem, só nas que realmente usam o Figma.
+      const figmaReadToolsInstruction =
+        "\n\nVocê TAMBÉM tem permissão para consultar (somente leitura) o arquivo do Figma " +
+        "que a pessoa compartilhou, usando as ferramentas do Figma disponíveis (como " +
+        "get_design_context, get_metadata, get_variable_defs, get_screenshot e " +
+        "search_design_system), sem precisar pedir confirmação a ninguém — essa permissão já " +
+        "foi concedida de antemão. Use essas ferramentas pra consultar os componentes, cores, " +
+        "tipografia e demais tokens do design system antes de gerar o HTML pedido, e siga " +
+        "fielmente o que encontrar lá (nunca invente cores, fontes ou componentes). Você NÃO " +
+        "tem permissão para criar, editar ou alterar nada dentro do Figma — é uma consulta " +
+        "somente leitura. Se a conexão com o Figma falhar, é porque o app do Figma Desktop da " +
+        "pessoa não está aberto (ou está sem a opção \"Dev Mode MCP Server\" ativada nas " +
+        "preferências dele) — avise isso a ela nesses termos, em vez de dizer que falta " +
+        "permissão.";
+      const figmaMcpConfigJson =
+        '{"mcpServers":{"Figma":{"type":"http","url":"http://127.0.0.1:3845/mcp"}}}';
+      const FIGMA_READ_TOOLS =
+        "mcp__Figma__get_design_context,mcp__Figma__get_metadata,mcp__Figma__get_variable_defs," +
+        "mcp__Figma__get_screenshot,mcp__Figma__search_design_system,mcp__Figma__get_libraries," +
+        "mcp__Figma__whoami";
+
       // Continuidade de conversa: sem isso, cada mensagem virava uma chamada nova e "zerada"
       // do Claude Code, sem nenhuma memória do que já tinha sido lido/decidido nas mensagens
       // anteriores. Se já existe uma sessão salva pra esse projeto, retoma ela com --resume
@@ -2750,18 +2779,48 @@ export default function App() {
       const existingProjectForSession = projects.find((p) => p.id === targetProjectId);
       const existingCliSessionId = existingProjectForSession?.claudeCliSessionId || "";
 
-      const baseCliArgs = [
-        "-p",
-        cliPromptText,
-        "--append-system-prompt",
-        systemInstruction + fileToolsInstruction,
-        "--allowedTools",
-        "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch",
-        "--output-format",
-        "json",
-        "--model",
-        "sonnet"
-      ];
+      // Uma vez que o projeto usou um link do Figma, continuamos liberando as ferramentas do
+      // Figma nas próximas mensagens dele também (a pessoa pode pedir ajustes sem repetir o
+      // link, ex.: "ajusta a cor conforme o design system").
+      const mentionsFigmaLink = /figma\.com\//i.test(promptText);
+      const projectUsesFigma = Boolean(existingProjectForSession?.usesFigma) || mentionsFigmaLink;
+
+      const baseCliArgs = projectUsesFigma
+        ? [
+            "-p",
+            cliPromptText,
+            "--append-system-prompt",
+            systemInstruction + fileToolsInstruction + figmaReadToolsInstruction,
+            "--allowedTools",
+            `Write,Read,Edit,Glob,Grep,WebFetch,WebSearch,${FIGMA_READ_TOOLS}`,
+            "--mcp-config",
+            figmaMcpConfigJson,
+            "--strict-mcp-config",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet"
+          ]
+        : [
+            "-p",
+            cliPromptText,
+            "--append-system-prompt",
+            systemInstruction + fileToolsInstruction,
+            "--allowedTools",
+            "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch",
+            "--output-format",
+            "json",
+            "--model",
+            "sonnet"
+          ];
+
+      // Guarda que esse projeto passou a usar o Figma, assim que detectamos o link pela
+      // primeira vez (só grava se ainda não estava marcado, pra não disparar updates à toa).
+      if (mentionsFigmaLink && !existingProjectForSession?.usesFigma) {
+        setProjects((prev) =>
+          prev.map((p) => (p.id === targetProjectId ? { ...p, usesFigma: true } : p))
+        );
+      }
 
       // Roda o comando com um limite de tempo (5 minutos) — sem isso, se o "claude" travar por
       // qualquer motivo (rede instável, processo preso, etc.), o chat fica em "digitando..."
@@ -2846,7 +2905,9 @@ export default function App() {
       const attempt = (useResume, useToken = !claudeUseOwnLogin, triedOtherMode = false) => {
         const args =
           useResume && existingCliSessionId ? [...baseCliArgs, "--resume", existingCliSessionId] : baseCliArgs;
-        const cmdName = useResume && existingCliSessionId ? "claude-agent-prompt-resume" : "claude-agent-prompt";
+        const cmdName = useResume && existingCliSessionId
+          ? (projectUsesFigma ? "claude-agent-prompt-figma-resume" : "claude-agent-prompt-resume")
+          : (projectUsesFigma ? "claude-agent-prompt-figma" : "claude-agent-prompt");
 
         runClaudeCli(cmdName, args, useToken)
           .then((result) => {
@@ -4801,6 +4862,12 @@ export default function App() {
                 {settingsSavedFeedback ? t("settings_save_done") : hasUnsavedSettingsChanges ? t("settings_save_pending") : t("settings_save_idle")}
               </button>
             </div>
+
+            {/* RODAPÉ — versão do app, sempre visível no fim da tela de Configurações (fácil
+                de conferir/reportar, sem precisar abrir o cartão de Atualizações lá em cima). */}
+            <p style={{ textAlign: "center", fontSize: "11px", color: "var(--sm-muted)", marginTop: "32px", opacity: 0.6 }}>
+              Studio Method {appVersion ? `v${appVersion}` : "…"}
+            </p>
           </div>
           </div>
         )}

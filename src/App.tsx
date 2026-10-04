@@ -1841,7 +1841,24 @@ export default function App() {
     return OFFICIAL_BMAD_AGENTS;
   };
 
-  const [selectedAgent, setSelectedAgent] = useState(() => getAgentsForMethod(selectedMethod)[0]);
+  // Restaura o agente/skill que a pessoa estava usando nesse projeto (guardado em
+  // project.lastAgentId toda vez que ela escolhe um com "/"), em vez de sempre cair de
+  // volta no primeiro agente genérico da lista — era isso que fazia a pessoa ter que
+  // chamar "/agente" de novo em toda mensagem.
+  const resolveAgentForProject = (project, method) => {
+    const agentsForMethod = getAgentsForMethod(method);
+    const lastAgentId = project?.lastAgentId;
+    const restored = lastAgentId ? agentsForMethod.find((a) => a.id === lastAgentId) : null;
+    return restored || agentsForMethod[0];
+  };
+
+  // Também restaura o último agente usado já na abertura do app (não só ao trocar de
+  // projeto em runtime) — sem isso, reabrir o SM sempre voltava pro agente genérico.
+  const [selectedAgent, setSelectedAgent] = useState(() => {
+    const stored = loadStoredProjects();
+    const initialMethod = stored.length > 0 ? stored[0].method || "BMAD" : "BMAD";
+    return resolveAgentForProject(stored[0], initialMethod);
+  });
 
   const [messages, setMessages] = useState(() => {
     const stored = loadStoredProjects();
@@ -1930,11 +1947,6 @@ export default function App() {
       console.error("Erro ao salvar que o onboarding foi visto:", err);
     }
   };
-
-  // Sempre que o método mudar, troca o agente/skill selecionado para o primeiro da lista correta
-  useEffect(() => {
-    setSelectedAgent(getAgentsForMethod(selectedMethod)[0]);
-  }, [selectedMethod]);
 
   // Fecha o menu de agentes (/) quando o usuário clica fora da caixa de entrada
   useEffect(() => {
@@ -2259,8 +2271,10 @@ export default function App() {
     if (activeProjectId === projectToDelete.id) {
       if (updatedProjects.length > 0) {
         const nextProject = updatedProjects[0];
+        const nextMethod = nextProject.method || "BMAD";
         setActiveProjectId(nextProject.id);
-        setSelectedMethod(nextProject.method || "BMAD");
+        setSelectedMethod(nextMethod);
+        setSelectedAgent(resolveAgentForProject(nextProject, nextMethod));
         setSelectedEngine(nextProject.engine || "Ollama (Local)");
         setMessages(nextProject.messages || []);
       } else {
@@ -2274,8 +2288,10 @@ export default function App() {
   };
 
   const handleSelectProject = (project) => {
+    const projectMethod = project.method || "BMAD";
     setActiveProjectId(project.id);
-    setSelectedMethod(project.method || "BMAD");
+    setSelectedMethod(projectMethod);
+    setSelectedAgent(resolveAgentForProject(project, projectMethod));
     setSelectedEngine(project.engine || "Ollama (Local)");
     setMessages(project.messages || []);
     setCurrentView("editor");
@@ -2596,7 +2612,53 @@ export default function App() {
       ? `Sempre que precisar de um componente, padrão ou estilo que NÃO existe no Design System, pare e pergunte ao usuário antes de criá-lo, no formato: "Preciso criar um componente para [finalidade]. Você autoriza a criação? (sim/não)". Só prossiga depois da resposta do usuário.`
       : `Você tem liberdade para criar componentes ou padrões novos quando necessário, sem precisar pedir autorização — mas sempre que possível, inspire-se no que já existe no Design System.`;
 
-    return `\n\n[DESIGN SYSTEM CORPORATIVO]: O Design System oficial da empresa está disponível em: ${designSystemPath}. Sempre que for pedido para criar ou ajustar interfaces, componentes ou telas, utilize os padrões, componentes e estilos definidos nesse Design System como referência prioritária. Nível de aderência exigido pelo usuário: ${designSystemAdherence}/100 (0 = liberdade total, 100 = seguir estritamente os padrões existentes). ${approvalRule}`;
+    // O campo é um texto livre (link do Figma, repositório Git ou pasta local) — como o
+    // formato muda o JEITO de consultar, detectamos o tipo e explicamos explicitamente como
+    // acessar, em vez de só citar o caminho e deixar o agente adivinhar (foi isso que fazia
+    // ele nem tentar olhar uma pasta local, por exemplo, e só vasculhar a pasta do projeto).
+    const trimmedPath = designSystemPath.trim();
+    const isFigmaLink = /figma\.com\//i.test(trimmedPath);
+    const githubMatch = !isFigmaLink && trimmedPath.match(/^https?:\/\/(www\.)?github\.com\/([^\/\s]+)\/([^\/\s]+?)(\.git)?(\/tree\/([^\/\s]+)(\/(.*))?)?\/?$/i);
+    const isOtherUrl = !isFigmaLink && !githubMatch && /^https?:\/\//i.test(trimmedPath);
+    let accessInstruction;
+    if (isFigmaLink) {
+      accessInstruction =
+        "É um link do Figma — use as ferramentas do Figma (get_design_context, get_metadata, " +
+        "get_variable_defs, get_screenshot, search_design_system) pra consultar os componentes, " +
+        "cores, tipografia e variáveis reais antes de aplicar (nunca invente valores). Se a " +
+        "conexão com o Figma falhar, avise que o Figma Desktop precisa estar aberto com a opção " +
+        "\"Dev Mode MCP Server\" ativada nas preferências dele.";
+    } else if (githubMatch) {
+      const owner = githubMatch[2];
+      const repo = githubMatch[3];
+      const branch = githubMatch[6] || "main";
+      const subPath = githubMatch[8] || "";
+      accessInstruction =
+        `É um repositório do GitHub (dono "${owner}", repositório "${repo}"${subPath ? `, pasta "${subPath}"` : ""}). ` +
+        "Você NÃO tem acesso a comandos de terminal/git, então NÃO tente clonar o repositório — " +
+        "em vez disso, use a ferramenta WebFetch (ela também serve pra chamar APIs HTTP comuns, " +
+        "não só páginas) nestes dois endpoints, que são requisições HTTP simples: " +
+        `(1) para listar os arquivos: "https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1" ` +
+        `(se der 404, tente o branch "master" no lugar de "${branch}"); ` +
+        `(2) para ler o conteúdo de um arquivo específico que encontrar na lista: ` +
+        `"https://raw.githubusercontent.com/${owner}/${repo}/${branch}/<caminho-do-arquivo-dentro-do-repo>". ` +
+        (subPath ? `Priorize os arquivos dentro de "${subPath}". ` : "") +
+        "Leia os arquivos de tokens/estilos/componentes relevantes antes de aplicar qualquer padrão — nunca invente valores.";
+    } else if (isOtherUrl) {
+      accessInstruction =
+        "É um link (outra URL) — use a ferramenta de leitura de páginas da internet (WebFetch) " +
+        "pra consultar o conteúdo antes de aplicar.";
+    } else {
+      accessInstruction =
+        `É uma pasta local no computador da pessoa, no caminho absoluto "${trimmedPath}" — ` +
+        "esse caminho fica FORA da pasta do projeto atual, mas você tem permissão pra explorá-lo " +
+        "mesmo assim: use Glob (ex.: \"" + trimmedPath + "/**/*\") pra listar o que tem lá e Read " +
+        "pra abrir os arquivos relevantes (HTML, CSS, imagens, tokens em JSON, etc.) antes de " +
+        "aplicar qualquer padrão — nunca invente componentes, cores ou estilos sem antes ter " +
+        "olhado o conteúdo real dessa pasta.";
+    }
+
+    return `\n\n[DESIGN SYSTEM CORPORATIVO]: O Design System oficial da empresa está disponível em: ${designSystemPath}. ${accessInstruction} Sempre que for pedido para criar ou ajustar interfaces, componentes ou telas, utilize os padrões, componentes e estilos definidos nesse Design System como referência prioritária. Nível de aderência exigido pelo usuário: ${designSystemAdherence}/100 (0 = liberdade total, 100 = seguir estritamente os padrões existentes). ${approvalRule}`;
   };
 
   // Monta a instrução extra de Diretrizes de Design (documentos subidos pelo PD em
@@ -2782,8 +2844,15 @@ export default function App() {
       // Uma vez que o projeto usou um link do Figma, continuamos liberando as ferramentas do
       // Figma nas próximas mensagens dele também (a pessoa pode pedir ajustes sem repetir o
       // link, ex.: "ajusta a cor conforme o design system").
+      // Conta tanto um link do Figma colado na própria mensagem quanto o "Design System de
+      // referência" configurado nas Configurações (quando ele é um link do Figma e o agente
+      // atual é um agente de design — é só o PD que usa essa referência "crua", igual já
+      // valia pra buildDesignSystemInstruction acima). Sem isso, quem configurasse o Design
+      // System uma vez em Configurações teria que colar o link de novo em toda conversa.
       const mentionsFigmaLink = /figma\.com\//i.test(promptText);
-      const projectUsesFigma = Boolean(existingProjectForSession?.usesFigma) || mentionsFigmaLink;
+      const designSystemIsFigma = isDesignAgent(agentToUse) && /figma\.com\//i.test(designSystemPath || "");
+      const projectUsesFigma =
+        Boolean(existingProjectForSession?.usesFigma) || mentionsFigmaLink || designSystemIsFigma;
 
       const baseCliArgs = projectUsesFigma
         ? [
@@ -3187,6 +3256,15 @@ export default function App() {
 
     const targetProject = await resolveActiveProject(commandText);
     if (!targetProject) return; // usuário cancelou a escolha da pasta
+
+    // Lembra qual foi o último agente escolhido nesse projeto — assim, da próxima vez que a
+    // pessoa abrir esse mesmo projeto (ou mandar uma mensagem sem usar "/"), a conversa
+    // continua com esse mesmo agente, em vez de voltar pro genérico.
+    if (targetProject.lastAgentId !== agent.id) {
+      setProjects((prev) =>
+        prev.map((p) => (p.id === targetProject.id ? { ...p, lastAgentId: agent.id } : p))
+      );
+    }
 
     setInputMessage("");
 
@@ -5196,7 +5274,11 @@ export default function App() {
 
                         <select
                           value={selectedMethod}
-                          onChange={(e) => setSelectedMethod(e.target.value)}
+                          onChange={(e) => {
+                            const newMethod = e.target.value;
+                            setSelectedMethod(newMethod);
+                            setSelectedAgent(getAgentsForMethod(newMethod)[0]);
+                          }}
                           style={{ backgroundColor: "rgba(0,0,0,0.3)", color: "var(--sm-pale)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", padding: "4px 8px", fontSize: "11px" }}
                         >
                           <option value="BMAD">BMad Method v6</option>

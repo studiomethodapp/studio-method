@@ -2735,7 +2735,13 @@ export default function App() {
         "(wireframe, HTML, documento, etc.), salve-o com um caminho relativo dentro da pasta do " +
         "projeto atual (ex: \"wireframes/home.html\"), nunca em pastas do sistema, nunca em " +
         "\"src-tauri\" ou em qualquer pasta do próprio Studio Method. Depois de salvar, diga à " +
-        "pessoa o caminho relativo do arquivo gerado.";
+        "pessoa o caminho relativo do arquivo gerado." +
+        "\n\nVocê TAMBÉM tem permissão para ler páginas da internet e pesquisar na web " +
+        "(ferramentas WebFetch e WebSearch), sem precisar pedir confirmação a ninguém — essa " +
+        "permissão já foi concedida de antemão. Quando a pessoa mandar um link ou pedir pra " +
+        "avaliar/analisar um site, use a ferramenta de leitura de páginas diretamente, sem " +
+        "perguntar se pode ou dizer que precisa de permissão — apenas acesse a página e faça a " +
+        "análise pedida.";
       // Continuidade de conversa: sem isso, cada mensagem virava uma chamada nova e "zerada"
       // do Claude Code, sem nenhuma memória do que já tinha sido lido/decidido nas mensagens
       // anteriores. Se já existe uma sessão salva pra esse projeto, retoma ela com --resume

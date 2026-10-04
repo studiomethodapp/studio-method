@@ -828,6 +828,18 @@ const isDesignAgent = (agent) => {
   return /design|ux|ui|interface/.test(haystack);
 };
 
+// Identifica se o PEDIDO em si é sobre construir algo visual (interface, protótipo, site,
+// app, sistema, etc.) — independente de qual agente está respondendo. O Design System
+// corporativo e as Diretrizes de Design devem valer sempre que a pessoa pedir isso, mesmo
+// falando com o BMad Master, o Dev, ou qualquer skill do Superpowers, não só com um agente
+// "de design" dedicado.
+const requestsVisualWork = (text) => {
+  if (!text) return false;
+  return /\b(interface|interfaces|prot[oó]tipo|prototype|wireframe|mockup|layout|tela|telas|p[aá]gina|p[aá]ginas|website|site|webapp|web ?app|aplicativo|app|sistema|componente|componentes|html|css|ui|ux|design|visual|front-?end)\b/i.test(
+    text
+  );
+};
+
 // Retorna uma descrição curta do nível de aderência ao Design System, para exibir na UI
 const getAdherenceLabel = (value, lang) => {
   const dict = TRANSLATIONS[lang] || TRANSLATIONS.pt;
@@ -2604,8 +2616,8 @@ export default function App() {
 
   // Monta a instrução extra de Design System para agentes que criam interfaces,
   // de acordo com o caminho configurado e o nível de aderência escolhido em Configurações
-  const buildDesignSystemInstruction = (agentToUse) => {
-    if (!isDesignAgent(agentToUse) || !designSystemPath) return "";
+  const buildDesignSystemInstruction = (agentToUse, promptText) => {
+    if ((!isDesignAgent(agentToUse) && !requestsVisualWork(promptText)) || !designSystemPath) return "";
 
     const mustAsk = designSystemAdherence >= 50;
     const approvalRule = mustAsk
@@ -2666,8 +2678,8 @@ export default function App() {
   // do arquivo), não o conteúdo extraído — quem lê de verdade é o próprio agente,
   // igual já acontece com o Design System corporativo acima. Considera só os
   // documentos que estiverem com o toggle ligado no momento do envio.
-  const buildDesignGuidelinesInstruction = (agentToUse) => {
-    if (!isDesignAgent(agentToUse)) return "";
+  const buildDesignGuidelinesInstruction = (agentToUse, promptText) => {
+    if (!isDesignAgent(agentToUse) && !requestsVisualWork(promptText)) return "";
 
     const activeDocs = designGuidelines.filter((d) => d.enabled);
     if (activeDocs.length === 0) return "";
@@ -2725,8 +2737,8 @@ export default function App() {
   // disso, guarda o conteúdo junto da mensagem e espera o usuário escolher, clicando
   // em "Atualizar PRD atual" ou "Gerar nova versão" (handlePrdDecision cuida de salvar).
   const sendToAgent = (promptText, agentToUse, targetProjectId, targetLocalPath, isFirstTurn) => {
-    const designSystemInstruction = buildDesignSystemInstruction(agentToUse);
-    const designGuidelinesInstruction = buildDesignGuidelinesInstruction(agentToUse);
+    const designSystemInstruction = buildDesignSystemInstruction(agentToUse, promptText);
+    const designGuidelinesInstruction = buildDesignGuidelinesInstruction(agentToUse, promptText);
     const prdInstruction = buildPrdInstruction(targetProjectId, isFirstTurn);
     const systemInstruction = `${agentToUse.prompt}${RESPONSE_STYLE_INSTRUCTION}${designSystemInstruction}${designGuidelinesInstruction}${prdInstruction}${PRD_SAVE_INSTRUCTION}${buildResponseLanguageInstruction()}`;
 
@@ -2850,7 +2862,9 @@ export default function App() {
       // valia pra buildDesignSystemInstruction acima). Sem isso, quem configurasse o Design
       // System uma vez em Configurações teria que colar o link de novo em toda conversa.
       const mentionsFigmaLink = /figma\.com\//i.test(promptText);
-      const designSystemIsFigma = isDesignAgent(agentToUse) && /figma\.com\//i.test(designSystemPath || "");
+      const designSystemIsFigma =
+        (isDesignAgent(agentToUse) || requestsVisualWork(promptText)) &&
+        /figma\.com\//i.test(designSystemPath || "");
       const projectUsesFigma =
         Boolean(existingProjectForSession?.usesFigma) || mentionsFigmaLink || designSystemIsFigma;
 

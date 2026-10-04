@@ -45,7 +45,7 @@ If you connect an AI model (Claude, a local Ollama server, or another OpenAI-API
 3. Open the installer and follow the steps.
 
 **Operating system security warning:** since the app hasn't gone through the paid digital signing process yet (Apple/Microsoft), macOS and Windows may show a warning saying the developer is unrecognized. This is expected — to open it anyway:
-- **Mac**: right-click the app → "Open" → confirm "Open" in the dialog that appears.
+- **Mac**: if you see "Studio Method is damaged and can't be opened" (or "unidentified developer"), go to **System Settings → Privacy & Security**, scroll to the bottom and click **"Open Anyway"** next to the Studio Method warning. On older macOS versions, right-clicking the app → "Open" → confirming "Open" also works. If neither shows up, open Terminal and run `xattr -cr /Applications/Studio\ Method.app` (adjust the path if installed elsewhere), then try opening it again.
 - **Windows**: on the blue SmartScreen screen, click "More info" → "Run anyway".
 
 ## Getting started after installing

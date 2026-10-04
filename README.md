@@ -45,7 +45,7 @@ Se você conectar um modelo de IA (Claude, um servidor Ollama local, ou outro co
 3. Abra o instalador e siga o passo a passo.
 
 **Aviso de segurança do sistema operacional:** como o app ainda não passou pelo processo pago de assinatura digital (Apple/Microsoft), o Mac e o Windows podem mostrar um aviso dizendo que o desenvolvedor não é reconhecido. Isso é esperado — para abrir mesmo assim:
-- **Mac**: clique com o botão direito no app → "Abrir" → confirme "Abrir" na janela que aparecer.
+- **Mac**: se aparecer a mensagem "Studio Method está danificado e não pode ser aberto" (ou "desenvolvedor não identificado"), vá em **Ajustes do Sistema → Privacidade e Segurança**, role até o final e clique em **"Abrir assim mesmo"** ao lado do aviso sobre o Studio Method. Em versões mais antigas do macOS, também funciona clicar com o botão direito no app → "Abrir" → confirmar "Abrir". Se nada disso aparecer, abra o Terminal e rode `xattr -cr /Applications/Studio\ Method.app` (ajuste o caminho se instalou em outro lugar), depois tente abrir de novo.
 - **Windows**: na tela azul do SmartScreen, clique em "Mais informações" → "Executar assim mesmo".
 
 ## Primeiros passos após instalar

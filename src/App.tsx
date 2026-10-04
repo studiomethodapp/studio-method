@@ -49,6 +49,10 @@ const CUSTOM_PROVIDER_MODEL_KEY = "studio-method-custom-provider-model";
 const CUSTOM_PROVIDER_API_KEY_KEY = "studio-method-custom-provider-api-key";
 // Chave usada pra guardar a credencial obtida ao conectar com a assinatura Claude (via "claude setup-token")
 const CLAUDE_OAUTH_TOKEN_KEY = "studio-method-claude-oauth-token";
+// Quando "1", o app NÃO injeta o token guardado em cada chamada: deixa o próprio "claude" usar
+// (e renovar sozinho) o login dele. Isso evita reconectar toda hora: o token que o app lê do
+// Chaveiro é o de login, de curta duração, e só o "claude" sabe renová-lo.
+const CLAUDE_OWN_LOGIN_KEY = "studio-method-claude-own-login";
 // Detecta Windows pra evitar truques específicos de macOS/Linux (como o terminal
 // simulado via "script", que não existe no Windows) no fluxo de conectar a assinatura.
 const IS_WINDOWS = typeof navigator !== "undefined" && /win/i.test(navigator.platform || navigator.userAgent || "");
@@ -1494,6 +1498,23 @@ export default function App() {
     }
   }, [claudeOAuthToken]);
 
+  // Se o "claude" deve usar o próprio login (em vez do token guardado). Ver CLAUDE_OWN_LOGIN_KEY.
+  const [claudeUseOwnLogin, setClaudeUseOwnLogin] = useState(() => {
+    try {
+      return localStorage.getItem(CLAUDE_OWN_LOGIN_KEY) === "1";
+    } catch (err) {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CLAUDE_OWN_LOGIN_KEY, claudeUseOwnLogin ? "1" : "0");
+    } catch (err) {
+      console.error("Erro ao salvar a preferência de login da Claude:", err);
+    }
+  }, [claudeUseOwnLogin]);
+
   // Só confere se o Claude Code está instalado (não exige estar conectado ainda) — usado
   // pra saber se mostra "Conectar" ou as instruções de instalação.
   const handleCheckClaudeCliInstalled = async () => {
@@ -1604,10 +1625,10 @@ export default function App() {
       const resolveBestToken = async () => {
         for (let attempt = 0; attempt < 5; attempt += 1) {
           const fromKeychain = await readTokenFromKeychain();
-          if (fromKeychain) return fromKeychain;
+          if (fromKeychain) return { token: fromKeychain, fromKeychain: true };
           await new Promise((resolve) => setTimeout(resolve, 600));
         }
-        return findToken();
+        return { token: findToken(), fromKeychain: false };
       };
 
       const finishOnce = (fn) => {
@@ -1643,8 +1664,9 @@ export default function App() {
           const token = findToken();
           if (token && token === lastQuietToken) {
             finishOnce(() => {
-              resolveBestToken().then((resolvedToken) => {
+              resolveBestToken().then(({ token: resolvedToken, fromKeychain }) => {
                 setClaudeOAuthToken(resolvedToken || token);
+                setClaudeUseOwnLogin(Boolean(resolvedToken && fromKeychain));
                 setClaudeCliStatus("connected");
               });
               invoke("claude_setup_token_kill").catch(() => {});
@@ -1669,9 +1691,10 @@ export default function App() {
       unlistenClosed = await listen("claude-setup-closed", (event) => {
         finishOnce(() => {
           const code = typeof event.payload === "number" ? event.payload : -1;
-          resolveBestToken().then((token) => {
+          resolveBestToken().then(({ token, fromKeychain }) => {
             if (token) {
               setClaudeOAuthToken(token);
+              setClaudeUseOwnLogin(Boolean(fromKeychain));
               setClaudeCliStatus("connected");
               return;
             }
@@ -1703,6 +1726,7 @@ export default function App() {
       claudeSetupActiveRef.current = false;
     }
     setClaudeOAuthToken("");
+    setClaudeUseOwnLogin(false);
     setClaudeCliStatus("not_connected");
   };
 
@@ -2726,7 +2750,7 @@ export default function App() {
         "--append-system-prompt",
         systemInstruction + fileToolsInstruction,
         "--allowedTools",
-        "Write,Read,Edit,Glob,Grep",
+        "Write,Read,Edit,Glob,Grep,WebFetch,WebSearch",
         "--output-format",
         "json",
         "--model",
@@ -2736,10 +2760,10 @@ export default function App() {
       // Roda o comando com um limite de tempo (5 minutos) — sem isso, se o "claude" travar por
       // qualquer motivo (rede instável, processo preso, etc.), o chat fica em "digitando..."
       // pra sempre, do mesmo jeito que travava antes no fluxo de conectar a assinatura.
-      const runClaudeCli = (cmdName, args) =>
+      const runClaudeCli = (cmdName, args, injectToken = true) =>
         new Promise((resolve, reject) => {
           const command = Command.create(cmdName, args, {
-            env: { CLAUDE_CODE_OAUTH_TOKEN: claudeOAuthToken },
+            env: injectToken && claudeOAuthToken ? { CLAUDE_CODE_OAUTH_TOKEN: claudeOAuthToken } : undefined,
             cwd: targetLocalPath || undefined
           });
           let stdout = "";
@@ -2803,12 +2827,22 @@ export default function App() {
       const isSessionError = (diagnostic) =>
         /no conversation found|session.*not found|invalid.*session|unknown session/i.test(String(diagnostic || ""));
 
-      const attempt = (useResume) => {
+      // Erro de autenticação (token expirado/inválido, sem login). Antes de pedir pra reconectar,
+      // tentamos uma vez o outro jeito de autenticar: com o token guardado ou com o login do
+      // próprio "claude" (que renova sozinho). Se o outro jeito funcionar, a gente lembra dele.
+      const isAuthError = (diagnostic: unknown) =>
+        /oauth access token (has expired|is invalid)|failed to authenticate|authentication_error|not logged in|please run \/login|\b401\b/i.test(
+          String(diagnostic || "")
+        );
+
+      // useToken: injeta o token guardado (true) ou deixa o "claude" usar o próprio login (false).
+      // triedOtherMode: já tentamos o outro jeito depois de um erro de autenticação (só uma vez).
+      const attempt = (useResume, useToken = !claudeUseOwnLogin, triedOtherMode = false) => {
         const args =
           useResume && existingCliSessionId ? [...baseCliArgs, "--resume", existingCliSessionId] : baseCliArgs;
         const cmdName = useResume && existingCliSessionId ? "claude-agent-prompt-resume" : "claude-agent-prompt";
 
-        runClaudeCli(cmdName, args)
+        runClaudeCli(cmdName, args, useToken)
           .then((result) => {
             // Tenta ler o JSON de qualquer forma — às vezes o erro vem dentro do próprio
             // JSON no stdout (ex: campo "is_error"/"result"), mesmo com código de saída != 0.
@@ -2825,7 +2859,11 @@ export default function App() {
                 setProjects((prev) =>
                   prev.map((p) => (p.id === targetProjectId ? { ...p, claudeCliSessionId: "" } : p))
                 );
-                attempt(false);
+                attempt(false, useToken, triedOtherMode);
+                return;
+              }
+              if (!triedOtherMode && claudeOAuthToken && isAuthError(diagnostic)) {
+                attempt(useResume, !useToken, true);
                 return;
               }
               finishError(friendlyCliError(diagnostic));
@@ -2840,6 +2878,9 @@ export default function App() {
                 prev.map((p) => (p.id === targetProjectId ? { ...p, claudeCliSessionId: newSessionId } : p))
               );
             }
+
+            // Se só funcionou depois de trocar o jeito de autenticar, lembra qual é o que funciona.
+            if (triedOtherMode) setClaudeUseOwnLogin(!useToken);
 
             const rawReply = parsedJson ? (parsedJson.result || "") : (result.stdout || "");
             finishReply(rawReply);

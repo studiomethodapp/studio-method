@@ -238,9 +238,41 @@ fn get_login_shell_path() -> Option<String> {
     }
 }
 
+// Apps abertos clicando no ícone (como o Studio Method) herdam do macOS um limite bem baixo de
+// arquivos abertos ao mesmo tempo por processo (normalmente 256) — bem menos do que o Claude
+// Code precisa pra funcionar. Quem abre o "claude" direto pelo Terminal geralmente não esbarra
+// nisso porque herda o limite mais alto que costuma estar configurado no perfil do shell (ex:
+// .zshrc). Como os processos que o app abre (o "claude") herdam o limite DESTE processo, basta
+// levantar esse limite uma vez aqui no início, antes de abrir a janela.
+#[cfg(target_os = "macos")]
+fn fix_ulimit() {
+    use std::mem::MaybeUninit;
+
+    unsafe {
+        let mut lim = MaybeUninit::<libc::rlimit>::uninit();
+        if libc::getrlimit(libc::RLIMIT_NOFILE, lim.as_mut_ptr()) != 0 {
+            return;
+        }
+        let mut lim = lim.assume_init();
+
+        // Não pede "infinito" (algumas versões do macOS recusam) — só levanta o limite
+        // "macio" (o que vale de verdade) até o teto que o próprio sistema permite pra esse
+        // processo, limitado a um valor generoso e seguro.
+        let target = lim.rlim_max.min(10_240);
+        if target > lim.rlim_cur {
+            lim.rlim_cur = target;
+            libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn fix_ulimit() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     fix_path_env();
+    fix_ulimit();
     tauri::Builder::default()
         .manage(ClaudeSetupPtyState { child: Mutex::new(None) })
         .plugin(tauri_plugin_fs::init())

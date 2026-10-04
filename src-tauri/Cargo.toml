@@ -1,6 +1,6 @@
 [package]
 name = "studio-method"
-version = "0.1.6"
+version = "0.1.7"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -28,6 +28,9 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 portable-pty = "0.9"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
